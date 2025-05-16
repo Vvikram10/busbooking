@@ -1,16 +1,53 @@
-from django.shortcuts import render
 
-# Create your views here.
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import status
 from django.db import transaction
 from .models import Bus, Seat, Booking, BookedSeat
-from .serializers import BusSerializer, SeatSerializer, BookingSerializer, UserSerializer
+from .serializers import BusSerializer, RegisterSerializer, SeatSerializer, BookingSerializer, UserSerializer
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import authenticate
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register(request):
+    serializer = RegisterSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save()
+
+        # ⬇️ Iss line se JWT token generate hota hai
+        refresh = RefreshToken.for_user(user)
+
+        user_serializer = UserSerializer(user)
+        return Response({
+            'user': user_serializer.data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }, status=status.HTTP_201_CREATED)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+
+    if not username or not password:
+        return Response({'detail': 'Both username and password are required'}, status=400)
+    
+    user = authenticate(username=username,password=password)
+
+    if user is not None:
+        refresh = RefreshToken.for_user(user)
+        user_serializer = UserSerializer(user)
+        return Response({
+            'user': user_serializer.data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }, status=status.HTTP_200_OK)
+    return Response({'detail': 'Invalid credentials'}, status=401)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -106,63 +143,3 @@ def my_bookings(request):
     serializer = BookingSerializer(bookings, many=True)
     return Response(serializer.data)
 
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def initialize_bus_seats(request):
-#     """Admin function to initialize seats for a bus"""
-#     bus_id = request.data.get('bus_id')
-#     try:
-#         bus = Bus.objects.get(id=bus_id)
-        
-#         # Delete existing seats
-#         Seat.objects.filter(bus=bus).delete()
-        
-#         # Create new seats based on bus configuration
-#         seats = []
-#         seat_number = 1
-        
-#         if bus.has_sleeper:
-#             # Create sleeper configuration (lower + upper berths)
-#             for row in range(1, bus.total_rows + 1):
-#                 # Lower berth
-#                 seats.append(Seat(
-#                     bus=bus,
-#                     seat_number=seat_number,
-#                     seat_type='LOWER',
-#                     row=row,
-#                     column='L'
-#                 ))
-#                 seat_number += 1
-                
-#                 # Upper berth
-#                 seats.append(Seat(
-#                     bus=bus,
-#                     seat_number=seat_number,
-#                     seat_type='UPPER',
-#                     row=row,
-#                     column='U'
-#                 ))
-#                 seat_number += 1
-#         else:
-#             # Create seater configuration (3 seats per row)
-#             for row in range(1, bus.total_rows + 1):
-#                 for col in ['A', 'B', 'C']:
-#                     seats.append(Seat(
-#                         bus=bus,
-#                         seat_number=seat_number,
-#                         seat_type='SEATER',
-#                         row=row,
-#                         column=col
-#                     ))
-#                     seat_number += 1
-        
-#         # Bulk create the seats
-#         Seat.objects.bulk_create(seats)
-        
-#         return Response({"message": f"Created {len(seats)} seats for bus {bus.bus_number}"}, 
-#                         status=status.HTTP_201_CREATED)
-        
-#     except Bus.DoesNotExist:
-#         return Response({"error": "Bus not found"}, status=status.HTTP_404_NOT_FOUND)
-#     except Exception as e:
-#         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
